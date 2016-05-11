@@ -3,6 +3,7 @@ import tensorflow as tf
 import numpy as np
 import random
 import shutil
+import json
 import sys
 import os
 
@@ -26,7 +27,7 @@ def render_text(text, font):
   image_1x = image_2x.resize((w / 2, h / 2), Image.BILINEAR)
   return image_1x, image_2x
 
-def generate_samples(image_1x, image_2x, radius, samples):
+def generate_samples(image_1x, image_2x, radius, samples_in, samples_out):
   w1, h1 = image_1x.size
   w2, h2 = image_2x.size
   assert w1 * 2 == w2 and h1 * 2 == h2
@@ -58,83 +59,100 @@ def generate_samples(image_1x, image_2x, radius, samples):
         d11 / 255.0,
       ]
 
-      samples.append((data_in, data_out, d00 + d10 + d01 + d11))
+      samples_in.append(data_in)
+      samples_out.append(data_out)
 
 def test_solution(image_1x, image_2x, image_2x_name, radius, x, layer_2x2):
-  samples = []
+  samples_in = []
+  samples_out = []
   pixels_2x = []
   w1, h1 = image_1x.size
   w2, h2 = image_2x.size
-  super_image_2x = Image.new('L', (w2, h2))
-  generate_samples(image_1x, image_2x, radius, samples)
+  generate_samples(image_1x, image_2x, radius, samples_in, samples_out)
+  pixels_2x2 = layer_2x2.eval(feed_dict={
+    x: samples_in,
+  })
 
+  pixels = []
   for ry in xrange(0, h1):
-    row1 = []
-    row2 = []
     for rx in xrange(0, w1):
-      pixels_2x2 = layer_2x2.eval(feed_dict={
-        x: [samples[rx + ry * w1][0]],
-      })[0]
-      super_image_2x.putpixel((2 * rx, 2 * ry), clamp(pixels_2x2[0]))
-      super_image_2x.putpixel((2 * rx + 1, 2 * ry), clamp(pixels_2x2[1]))
-      super_image_2x.putpixel((2 * rx, 2 * ry + 1), clamp(pixels_2x2[2]))
-      super_image_2x.putpixel((2 * rx + 1, 2 * ry + 1), clamp(pixels_2x2[3]))
+      pixel_2x2 = pixels_2x2[rx + ry * w1]
+      pixels.append(clamp(pixel_2x2[0]))
+      pixels.append(clamp(pixel_2x2[1]))
+    for rx in xrange(0, w1):
+      pixel_2x2 = pixels_2x2[rx + ry * w1]
+      pixels.append(clamp(pixel_2x2[2]))
+      pixels.append(clamp(pixel_2x2[3]))
 
+  super_image_2x = Image.new('L', (w2, h2))
+  super_image_2x.putdata(pixels)
   super_image_2x.save(open(image_2x_name, 'w'))
 
 def load_cached_ascii_samples(radius):
-  name = 'fsr_radius_%d.npy' % radius
+  name = 'fsr_radius_%d.npz' % radius
+
+  print 'loading', name
   try:
-    return np.load(name)
+    data = np.load(name)
+    print 'done loading'
+    return data['samples_in'], data['samples_out']
   except IOError:
     pass
-  samples = generate_ascii_samples(radius)
-  np.save(name, samples)
-  return samples
+
+  print 'generating', name
+  samples_in, samples_out = generate_ascii_samples(radius)
+  np.savez(name, samples_in=samples_in, samples_out=samples_out)
+  print '\rdone generating'
+  return samples_in, samples_out
 
 def generate_ascii_samples(radius):
   glyphs = []
-  samples = []
+  samples_in = []
+  samples_out = []
 
   glyphs += [render_text(chr(c), serif) for c in xrange(0x21, 0x7F)]
   glyphs += [render_text(chr(c), sans_serif) for c in xrange(0x21, 0x7F)]
-
-  print 'generating samples'
 
   for i in xrange(0, len(glyphs)):
     sys.stdout.write('\r' + percent(i, len(glyphs)))
     sys.stdout.flush()
     image_1x, image_2x = glyphs[i]
-    generate_samples(image_1x, image_2x, radius, samples)
+    generate_samples(image_1x, image_2x, radius, samples_in, samples_out)
 
-  print '\rdone'
+  samples_in = np.array(samples_in, np.float32)
+  samples_out = np.array(samples_out, np.float32)
 
-  return np.array(samples)
+  return samples_in, samples_out
 
 def fill(shape, callback):
   return callback() if not shape else [fill(shape[1:], callback) for x in xrange(shape[0])]
 
 def main():
-  radius = 2 # The kernel has size 2 * radius + 1
-  samples = load_cached_ascii_samples(radius)
+  radius = 1 # The kernel has size 2 * radius + 1
+  samples_in, samples_out = load_cached_ascii_samples(radius)
   sess = tf.InteractiveSession()
 
-  input_size = len(samples[0][0])
-  output_size = len(samples[0][1])
+  input_size = len(samples_in[0])
+  output_size = len(samples_out[0])
   sizes = [input_size, 8, output_size]
 
   x = tf.placeholder(tf.float32, shape=[None, input_size], name='x')
   y = tf.placeholder(tf.float32, shape=[None, output_size], name='y')
 
-  layer = x
+  final_layer = x
+  layer_weights = []
+  layer_biases = []
+
   for i in xrange(1, len(sizes)):
     size_before, size_after = sizes[i - 1:i + 1]
     weights = tf.Variable(fill([size_before, size_after], lambda: random.uniform(0.5, 1.5) / (size_before * size_after)))
     bias = tf.Variable(fill([size_after], lambda: random.uniform(0.5, 1.5) / size_after))
-    layer = tf.nn.relu(tf.matmul(layer, weights) + bias)
+    layer_weights.append(weights)
+    layer_biases.append(bias)
+    final_layer = tf.nn.relu(tf.matmul(final_layer, weights) + bias)
 
-  error = tf.reduce_mean(tf.reduce_sum(tf.square(tf.reshape(layer, [-1, output_size]) - y), reduction_indices=[1]))
-  train_step = tf.train.AdamOptimizer(0.001).minimize(error)
+  error = tf.reduce_mean(tf.reduce_sum(tf.square(tf.reshape(final_layer, [-1, output_size]) - y), reduction_indices=[1]))
+  train_step = tf.train.AdamOptimizer(0.01).minimize(error)
   sess.run(tf.initialize_all_variables())
 
   test_1x, test_2x = render_text('test', serif)
@@ -146,24 +164,32 @@ def main():
   test_2x.save(open('./fsr_data/image_2x.png', 'w'))
   test_2x_linear.save(open('./fsr_data/image_2x_linear.png', 'w'))
 
-  test_batch = random.sample(samples, 100)
+  test_batch_indices = random.sample(xrange(len(samples_in)), 100)
+  test_batch_in = [samples_in[i] for i in test_batch_indices]
+  test_batch_out = [samples_out[i] for i in test_batch_indices]
 
   # Training loop
-  for i in range(10000):
-    if i % 50 == 0:
-      test_solution(test_1x, test_2x, './fsr_data/image_2x_super_%d.png' % i, radius, x, layer)
+  for i in xrange(100 * 1000 + 1):
+    if i % 1000 == 0:
+      open('fsr_model_%d.json' % radius, 'w').write(json.dumps({
+        'sizes': sizes,
+        'weights': [[[float(a) for a in b] for b in c] for c in sess.run(layer_weights)],
+        'biases': [[float(a) for a in b] for b in sess.run(layer_biases)],
+      }, indent=2))
+
+      test_solution(test_1x, test_2x, './fsr_data/image_2x_super_%d.png' % i, radius, x, final_layer)
 
       current = error.eval(feed_dict={
-        x: [image_1x for image_1x, image_2x, total in test_batch],
-        y: [image_2x for image_1x, image_2x, total in test_batch],
+        x: test_batch_in,
+        y: test_batch_out,
       })
 
       print 'step %d, error %g' % (i, current)
 
-    batch = random.sample(samples, 100)
+    batch_indices = random.sample(xrange(len(samples_in)), 100)
     train_step.run(feed_dict={
-      x: [image_1x for image_1x, image_2x, total in batch],
-      y: [image_2x for image_1x, image_2x, total in batch],
+      x: [samples_in[i] for i in batch_indices],
+      y: [samples_out[i] for i in batch_indices],
     })
 
 main()
