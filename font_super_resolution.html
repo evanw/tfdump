@@ -1,0 +1,83 @@
+<style>
+  img {
+    image-rendering: pixelated;
+    margin: 10px;
+  }
+  td {
+    vertical-align: top;
+    padding-right: 50px;
+  }
+</style>
+
+<h2>Overview</h2>
+
+<table>
+  <tr>
+    <td>
+      1x:<br>
+      <img src="./fsr_data/image_1x.png"><br>
+    </td>
+    <td>
+      2x (original):<br>
+      <img src="./fsr_data/image_2x.png"><br>
+    </td>
+    <td>
+      2x (bilinear):<br>
+      <img src="./fsr_data/image_2x_linear.png"><br>
+    </td>
+    <td>
+      2x (learned):<br>
+      <img src="./fsr_data/image_2x_linear.png" id="latest"><br>
+    </td>
+  </tr>
+</table>
+
+<h2>Steps</h2>
+<script>
+  (function() {
+    function check(url, callback) {
+      var xhr = new XMLHttpRequest;
+      xhr.open('GET', url);
+      xhr.onloadend = function() { callback(xhr.status === 200); };
+      xhr.send();
+    }
+
+    function replaceImage(image, url) {
+      var replacement = new Image;
+      replacement.onload = function() {
+        if (image.parentNode !== null) {
+          image.parentNode.insertBefore(replacement, image);
+          image.parentNode.removeChild(image);
+        }
+      };
+      replacement.onerror = function() {
+        setTimeout(function() {
+          if (image.parentNode !== null) {
+            replaceImage(image, url);
+          }
+        }, 10);
+      };
+      replacement.id = image.id;
+      replacement.src = url;
+    }
+
+    function poll() {
+      var name = './fsr_data/image_2x_super_' + count + '.png';
+      check(name, function(exists) {
+        if (exists) {
+          count += 50;
+          var image = new Image;
+          document.body.appendChild(image);
+          replaceImage(latest, name);
+          replaceImage(image, name);
+          setTimeout(poll, 0);
+        } else {
+          setTimeout(poll, 50);
+        }
+      });
+    }
+
+    var count = 0;
+    poll();
+  })();
+</script>
