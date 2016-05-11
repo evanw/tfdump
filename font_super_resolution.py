@@ -132,13 +132,16 @@ def generate_ascii_samples(radius):
 
   return np.array(samples)
 
-def weight_variable(shape, values=None):
-  initial = tf.truncated_normal(shape, stddev=0.1)
-  return tf.Variable(values if values is not None else initial)
-
-def bias_variable(shape, value=0.1):
-  initial = tf.constant(value, shape=shape)
+def weight_variable(shape):
+  initial = tf.constant(1 / float(shape[0] * shape[1]), shape=shape)
   return tf.Variable(initial)
+
+def bias_variable(shape):
+  initial = tf.constant(0.0, shape=shape)
+  return tf.Variable(initial)
+
+def zeros(rows, cols):
+  return [[0 for col in xrange(cols)] for row in xrange(rows)]
 
 def main():
   radius = 1 # The kernel has size 2 * radius + 1
@@ -154,33 +157,11 @@ def main():
   x = tf.placeholder(tf.float32, shape=[None, input_size], name='x')
   y = tf.placeholder(tf.float32, shape=[None, output_size], name='y')
 
-  # A B C
-  # D E F
-  # G H I
-
-  weights = [
-    [
-      [0.25 * 0.25, 0.0,         0.0,         0.0], # A
-      [0.75 * 0.25, 0.75 * 0.25, 0.0,         0.0], # B
-      [0.0,         0.25 * 0.25, 0.0,         0.0], # C
-      [0.75 * 0.25, 0.0,         0.75 * 0.25, 0.0], # D
-      [0.75 * 0.75, 0.75 * 0.75, 0.75 * 0.75, 0.75 * 0.75], # E
-      [0.0,         0.75 * 0.25, 0.0,         0.75 * 0.25], # F
-      [0.0,         0.0,         0.25 * 0.25, 0.0], # G
-      [0.0,         0.0,         0.75 * 0.25, 0.75 * 0.25], # H
-      [0.0,         0.0,         0.0,         0.25 * 0.25], # I
-    ],
-  ]
-
-  biases = [
-    0.0,
-  ]
-
   layer = x
   for i in xrange(1, len(sizes)):
     size_before, size_after = sizes[i - 1:i + 1]
-    weights = weight_variable([size_before, size_after], weights[i - 1])
-    bias = bias_variable([size_after], biases[i - 1])
+    weights = weight_variable([size_before, size_after])
+    bias = bias_variable([size_after])
     layer = tf.nn.relu(tf.matmul(layer, weights) + bias)
 
   error = tf.reduce_mean(tf.reduce_sum(tf.square(tf.reshape(layer, [-1, output_size]) - y), reduction_indices=[1]))
