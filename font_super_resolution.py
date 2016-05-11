@@ -17,13 +17,15 @@ def percent(x, n):
 def clamp(x):
   return max(0, min(255, int(x * 256)))
 
-def render_text(text, font):
+def render_text(text, font, offset_x=0, offset_y=0):
   w, h = dummy_draw.textsize(text, font=font)
+  w += offset_x
+  h += offset_y
   w, h = w + w % 2, h + h % 2 # Round the size up to the next even number
   image_2x = Image.new('L', (w, h))
   draw = ImageDraw.Draw(image_2x)
   draw.rectangle((0, 0, w, h), fill='#FFFFFF')
-  draw.text((0, 0), text, fill='#000000', font=font)
+  draw.text((offset_x, offset_y), text, fill='#000000', font=font)
   image_1x = image_2x.resize((w / 2, h / 2), Image.BILINEAR)
   return image_1x, image_2x
 
@@ -33,8 +35,8 @@ def generate_samples(image_1x, image_2x, radius, samples_in, samples_out):
   assert w1 * 2 == w2 and h1 * 2 == h2
 
   # Visit every 2x2 pixel group
-  for ry in xrange(0, h1):
-    for rx in xrange(0, w1):
+  for ry in xrange(h1):
+    for rx in xrange(w1):
       data_in = []
 
       # Save the pixel that this group was downsampled to and the surrounding area
@@ -74,12 +76,12 @@ def test_solution(image_1x, image_2x, image_2x_name, radius, x, layer_2x2):
   })
 
   pixels = []
-  for ry in xrange(0, h1):
-    for rx in xrange(0, w1):
+  for ry in xrange(h1):
+    for rx in xrange(w1):
       pixel_2x2 = pixels_2x2[rx + ry * w1]
       pixels.append(clamp(pixel_2x2[0]))
       pixels.append(clamp(pixel_2x2[1]))
-    for rx in xrange(0, w1):
+    for rx in xrange(w1):
       pixel_2x2 = pixels_2x2[rx + ry * w1]
       pixels.append(clamp(pixel_2x2[2]))
       pixels.append(clamp(pixel_2x2[3]))
@@ -110,10 +112,13 @@ def generate_ascii_samples(radius):
   samples_in = []
   samples_out = []
 
-  glyphs += [render_text(chr(c), serif) for c in xrange(0x21, 0x7F)]
-  glyphs += [render_text(chr(c), sans_serif) for c in xrange(0x21, 0x7F)]
+  # Make sure training data includes all 2x2 downsamples, not just those with even coordinates
+  for offset_x in range(2):
+    for offset_y in range(2):
+      glyphs += [render_text(chr(c), serif, offset_x, offset_y) for c in xrange(0x21, 0x7F)]
+      glyphs += [render_text(chr(c), sans_serif, offset_x, offset_y) for c in xrange(0x21, 0x7F)]
 
-  for i in xrange(0, len(glyphs)):
+  for i in xrange(len(glyphs)):
     sys.stdout.write('\r' + percent(i, len(glyphs)))
     sys.stdout.flush()
     image_1x, image_2x = glyphs[i]
@@ -155,7 +160,7 @@ def main():
   train_step = tf.train.AdamOptimizer(0.01).minimize(error)
   sess.run(tf.initialize_all_variables())
 
-  test_1x, test_2x = render_text('test', serif)
+  test_1x, test_2x = render_text('test', serif, 0, 0)
   test_2x_linear = test_1x.resize(test_2x.size, Image.BILINEAR)
 
   shutil.rmtree('./fsr_data/', ignore_errors=True)
