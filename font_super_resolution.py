@@ -4,6 +4,7 @@ import numpy as np
 import random
 import shutil
 import json
+import math
 import sys
 import os
 
@@ -22,11 +23,28 @@ def render_text(text, font, offset_x=0, offset_y=0):
   w += offset_x
   h += offset_y
   w, h = w + w % 2, h + h % 2 # Round the size up to the next even number
+  image_1x = Image.new('L', (w / 2, h / 2))
   image_2x = Image.new('L', (w, h))
   draw = ImageDraw.Draw(image_2x)
   draw.rectangle((0, 0, w, h), fill='#FFFFFF')
   draw.text((offset_x, offset_y), text, fill='#000000', font=font)
-  image_1x = image_2x.resize((w / 2, h / 2), Image.BILINEAR)
+
+  # Gamma-correct downsampling
+  pixels = []
+  for y in xrange(0, h, 2):
+    for x in xrange(0, w, 2):
+      d00 = image_2x.getpixel((x, y))
+      d10 = image_2x.getpixel((x + 1, y))
+      d01 = image_2x.getpixel((x, y + 1))
+      d11 = image_2x.getpixel((x + 1, y + 1))
+      pixels.append(round(255 * math.pow((
+        math.pow(d00 / 255.0, 2.2) +
+        math.pow(d10 / 255.0, 2.2) +
+        math.pow(d01 / 255.0, 2.2) +
+        math.pow(d11 / 255.0, 2.2)
+      ) / 4, 1 / 2.2)))
+  image_1x.putdata(pixels)
+
   return image_1x, image_2x
 
 def generate_samples(image_1x, image_2x, radius, samples_in, samples_out):
